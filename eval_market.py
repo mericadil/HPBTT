@@ -9,6 +9,7 @@ from __future__ import print_function
 
 from absl import flags, app
 import os
+import torch
 import os.path as osp
 import numpy as np
 import cv2
@@ -19,9 +20,9 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib.pyplot import imsave
 
-from .data.base import pil_loader
-from .data.data_utils import RandomCrop
-from .external.hmr.src.util import image as hmr_img_util
+from data.base import pil_loader
+from data.data_utils import RandomCrop
+from external.hmr.src.util import image as hmr_img_util
 
 curr_path = osp.dirname(osp.abspath(__file__))
 cache_path = osp.join(curr_path, 'cachedir')
@@ -54,6 +55,51 @@ flags.DEFINE_boolean('hmr', True, 'if true do hmr.')
 
 opts = flags.FLAGS
 
+#add
+data_dir = '/auto/k2/adundar/3DSynthesis/data/texformer/datasets/SMPLMarket'
+
+
+paths_pkl_path = osp.join(data_dir, 'eval_list.pkl')
+with open(paths_pkl_path, 'rb') as f:
+    img_paths = pickle.load(f)
+
+
+# smpl dir
+smpl_dir = osp.join(data_dir, 'SMPL_RSC', 'pkl')
+
+# smpl part_seg dir
+smpl_part_seg_dir = osp.join(data_dir, 'SMPL_RSC', 'parts')
+smpl_part_seg_mapping = {3:1, 6:2, 1:3, 2:3, 7:4, 8:4, 4:5, 5:5, 9:6, 10:6, 11:7, 12:7}
+
+# part_seg dir
+part_seg_dir = osp.join(data_dir, 'part_seg_EANet')
+
+def preprocess_img(img):
+        # input: HxWxC, uint8(0~255)
+        img = (img / 255.) * 2 -1
+        img = torch.from_numpy(img).float().permute(2, 0, 1)
+        return img
+
+def preprocess_seg(seg):
+    seg_float = (seg / 7.) * 2 -1
+    seg_float = torch.from_numpy(seg_float).float().unsqueeze(0)
+    return seg_float
+
+def preprocess_smpl_seg(self, smpl_seg):
+    smpl_seg_long = np.zeros(smpl_seg.shape, dtype=int)
+    for k in self.smpl_part_seg_mapping.keys():
+        smpl_seg_long[smpl_seg==k] = self.smpl_part_seg_mapping[k]
+    smpl_seg_long = torch.from_numpy(smpl_seg_long).long().unsqueeze(0)
+    return smpl_seg_long
+
+def get_coord(shape):
+    y = np.linspace(-1.0, 1.0, num=shape[0])
+    x = np.linspace(-1.0, 1.0, num=shape[1])
+    coord_y, coord_x = np.meshgrid(y, x, indexing='ij')
+    coord = np.concatenate((coord_y[None], coord_x[None]), axis=0)
+    return torch.from_numpy(coord).float()
+
+#BURDA BITIYOR
 
 def partition_list(l, partition_size):
     divup = lambda a,b: int((a + b - 1) / b)
@@ -61,35 +107,44 @@ def partition_list(l, partition_size):
 
 
 def main(_):
+    opts.batch_size = 16
     if opts.hmr:
-        from .external.hmr.hmr import HMR
+        #from external.hmr.hmr import HMR
 
-        img_data = pickle.load(open('./HPBTT/cachedir/market1501/data/img_data_market1501.pkl', 'rb'))
-        g_id = list(img_data['query'].keys())
-        g_pids = []
+        #img_data = pickle.load(open('./cachedir/market1501/data/img_data_market1501.pkl', 'rb'))
+        img_data = pickle.load(open('/auto/k2/adundar/3DSynthesis/data/texformer/datasets/SMPLMarket/eval_list.pkl', 'rb'))
+        print(img_data)
+        #g_id = list(img_data['query'].keys())
+        #g_pids = []
         g_camids = []
         img_list = []
+        
+        return
         for i in range(len(g_id)):
             cam_view = img_data['query'][g_id[i]]
             for cam_id in cam_view.keys():
                 img_paths = cam_view[cam_id]
-                for img_path in img_paths:
+                for img_path_int in img_paths:
+                    img_path = "/auto/k2/adundar/3DSynthesis/data/texformer/datasets/SMPLMarket/query" + img_path_int.split('query')[1]
+                    #print(img_path)
                     g_pids.append(int(g_id[i]))
                     g_camids.append(int(cam_id))
                     img_list.append((img_path, int(g_id[i])))
-
+        return
         img_batch_list = partition_list(img_list, opts.batch_size)
         print(len(img_list))
         print(len(img_batch_list))
-
+        print(opts.batch_size)
         hmr = HMR(opts.batch_size)
-
+        print('gectim')
         for i in range(len(img_batch_list)-1):
             print(i)
             b = img_batch_list[i]
-
             img_ori_list = []
+            print(len(b))
             for j in range(len(b)):
+                print(b[j][0])
+                return
                 img = cv2.imread(b[j][0])
                 img_ori_list.append(np.expand_dims(img, 0))
 
@@ -101,15 +156,21 @@ def main(_):
                      'img_crop': img_crop,
                      'img_info': b}
 
-            with open('./HPBTT/cachedir/market1501/data/batch_hmr_q/batch_hmr_%d.pkl' % i, 'wb') as f:
+            print(batch['theta'].shape)
+            image = batch['img_crop'][0]
+            return
+            print('dumpliyom')
+            with open('/auto/k2/adundar/3DSynthesis/Other_architectures/HPBTT/cachedir/market1501/data/batch_hmr_q/batch_hmr_%d.pkl' % i, 'wb') as f:
                 pickle.dump(batch, f)
+            print('dumpladim')
     else:
+        return
         from .nnutils import predictor_market as pred_util
 
         predictor = pred_util.MeshPredictor(opts)
 
-        batch_root = './HPBTT/cachedir/market1501/data/batch_hmr_q'
-        bg_data_path = './dataset/PRW-v16.04.20/frames'
+        batch_root = '/auto/k2/adundar/3DSynthesis/Other_architectures/HPBTT/cachedir/market1501/data/batch_hmr_q'
+        bg_data_path = '/auto/k2/adundar/3DSynthesis/data/texformer/datasets/PRW/PRW-v16.04.20/frames'
         bg_data_list = []
 
         img_size = (128, 64)
